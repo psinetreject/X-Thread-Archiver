@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Compare Archives</title>
+  <link rel="icon" href="/icons/icon.svg">
+  <link rel="stylesheet" href="compare.css">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <p class="kicker">X Thread Archiver</p>
+      <h1>Compare two archives</h1>
+      <p class="intro">Pick two archive files of the same conversation, in either order. The add-on reads the data stored inside each file and shows what changed between the captures: new and gone posts, edits, name changes, community notes and counts.</p>
+    </header>
+
+    <form id="form" class="pick">
+      <label>Archive 1 <input type="file" id="fileA" accept=".html,text/html" required></label>
+      <label>Archive 2 <input type="file" id="fileB" accept=".html,text/html" required></label>
+      <button type="submit">Compare</button>
+    </form>
+    <p id="status" role="status"></p>
+
+    <div id="result" hidden>
+      <button id="save" type="button" class="save">Save this report</button>
+      <section id="changes" class="changes" aria-label="Changes"></section>
+    </div>
+  </div>
+  <script src="/content/diff.js"></script>
+  <script src="/content/render.js"></script>
+  <script src="compare.js"></script>
+</body>
+</html>

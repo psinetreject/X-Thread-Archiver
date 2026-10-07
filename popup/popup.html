@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <h1>X Thread Archiver</h1>
+  <p id="msg" role="status"></p>
+  <button id="copyLog" type="button" class="secondary" hidden>Copy capture log</button>
+
+  <form id="form" hidden>
+    <label class="row">Stop after <input type="number" id="maxPosts" min="1" max="5000" value="1000"> posts</label>
+    <label class="row"><input type="checkbox" id="expand" checked> Open hidden replies</label>
+    <label class="row"><input type="checkbox" id="followBranches" checked> Follow “Show replies” branches</label>
+    <label class="row"><input type="checkbox" id="fullText" checked> Get full text of long posts</label>
+    <label class="row"><input type="checkbox" id="fullSize" checked> Full-size images</label>
+    <label class="row">Videos
+      <select id="video">
+        <option value="720" selected>Save, up to 720p</option>
+        <option value="best">Save, best quality</option>
+        <option value="none">Don't save</option>
+      </select>
+    </label>
+    <fieldset>
+      <legend>Screenshots</legend>
+      <label class="row"><input type="radio" name="format" value="webp" checked> Compact (WebP)</label>
+      <label class="row"><input type="radio" name="format" value="png"> Lossless (PNG, larger file)</label>
+    </fieldset>
+    <button type="submit">Archive this conversation</button>
+  </form>
+
+  <div id="running" hidden>
+    <p id="phase"></p>
+    <p id="count"></p>
+    <button id="stop" type="button">Stop and save what's captured</button>
+  </div>
+
+  <p class="hint">Keep the tab in front while it runs. It scrolls the page and opens reply branches by itself.</p>
+  <p class="hint"><a href="#" id="compare">Compare two archive files…</a></p>
+  <script src="popup.js"></script>
+</body>
+</html>
