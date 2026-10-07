@@ -2,3 +2,5 @@ web-ext-artifacts/
 *.xpi
 *.zip
 .amo-upload-uuid
+tests/node_modules/
+tests/.output/

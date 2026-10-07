@@ -1,0 +1,14 @@
+{
+  "name": "thread-archiver-tests",
+  "private": true,
+  "description": "Tests for the Thread Archiver for X add-on (see README.md)",
+  "scripts": {
+    "test": "node run.js",
+    "test:unit": "node unit.test.js",
+    "test:firefox": "node firefox.test.js",
+    "test:chrome": "node chrome.test.js"
+  },
+  "devDependencies": {
+    "playwright": "1.64.0"
+  }
+}

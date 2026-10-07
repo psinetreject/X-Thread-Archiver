@@ -1,14 +1,23 @@
-// Background helper. Holds no capture state (MV3 event pages can be suspended);
-// the content script owns the run and asks for the few things only we can do.
+// Background helper. Holds no capture state (it can be suspended at any
+// time); the content script owns the run and asks for the few things only
+// the background can do. Runs as a background page in Firefox and as a
+// service worker in Chrome, which has no DOM (no Image, canvas or blob URLs).
+
+if (typeof importScripts === "function") importScripts("lib/compat.js"); // Chrome; Firefox lists it in the manifest
 
 const MEDIA_HOSTS = new Set(["pbs.twimg.com", "video.twimg.com"]);
 const MAX_ASSET_BYTES = 50 * 1024 * 1024;
+const FIREFOX = typeof browser.runtime.getBrowserInfo === "function";
 
-browser.runtime.onMessage.addListener((msg, sender) => {
+XTA.onMessage((msg, sender) => {
   const tabId = sender.tab?.id;
   switch (msg?.type) {
+    case "caps":
+      // Firefox can screenshot any rectangle of the page and pass Blobs in
+      // messages; Chrome can only capture the visible screen and pass JSON.
+      return { rectCapture: FIREFOX, blobMessages: FIREFOX };
     case "capture":
-      return capture(sender.tab, msg);
+      return capture(sender.tab, msg.rect);
     case "fetch-asset":
       return fetchAsset(msg.url);
     case "fetch-bytes":
@@ -21,33 +30,32 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       setBadge(tabId, msg.text, msg.color);
       return;
     case "save":
-      return save(msg.blob, msg.filename, !!sender.tab?.incognito);
+      return save(msg, !!sender.tab?.incognito);
   }
 });
 
-// Screenshot one region of the page. `rect` is in CSS pixels relative to the
-// document, which Firefox supports (Chrome's API cannot do this).
-// captureTab would need the <all_urls> permission; captureVisibleTab only
-// needs activeTab, but it captures whichever tab is in front in the window.
-async function capture(tab, { rect, format, quality }) {
+// Screenshot as PNG. In Firefox, `rect` (CSS pixels relative to the
+// document) captures exactly that region; Chrome ignores it and returns the
+// visible screen, which the content script crops. captureTab would need the
+// <all_urls> permission; captureVisibleTab only needs activeTab, but it
+// captures whichever tab is in front in the window.
+let lastCapture = 0;
+
+async function capture(tab, rect) {
   const [front] = await browser.tabs.query({ active: true, windowId: tab.windowId });
   if (front?.id !== tab.id) throw new Error("tab-not-in-front");
-  const png = await browser.tabs.captureVisibleTab(tab.windowId, { format: "png", rect });
-  if (format === "png") return { dataUrl: png };
-  return { dataUrl: await reencode(png, "image/webp", quality) };
-}
-
-async function reencode(dataUrl, type, quality) {
-  const img = new Image();
-  img.src = dataUrl;
-  await img.decode();
-  const canvas = document.createElement("canvas");
-  canvas.width = img.naturalWidth;
-  canvas.height = img.naturalHeight;
-  canvas.getContext("2d").drawImage(img, 0, 0);
-  const out = canvas.toDataURL(type, quality);
-  // Fall back to the original if the encoder isn't available.
-  return out.startsWith(`data:${type}`) ? out : dataUrl;
+  if (FIREFOX) return { dataUrl: await browser.tabs.captureVisibleTab(tab.windowId, { format: "png", rect }) };
+  // Chrome allows two captures per second.
+  for (let attempt = 0; ; attempt++) {
+    const wait = lastCapture + 550 - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastCapture = Date.now();
+    try {
+      return { dataUrl: await browser.tabs.captureVisibleTab(tab.windowId, { format: "png" }) };
+    } catch (e) {
+      if (!/MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND/.test(e.message) || attempt >= 5) throw e;
+    }
+  }
 }
 
 function checkHost(url) {
@@ -89,14 +97,17 @@ async function imageSize(blob) {
   }
 }
 
-// Video playlists and chunks for video.js.
+// Video playlists and chunks for video.js. Bytes travel as base64 because
+// Chrome messages can't carry binary data.
 async function fetchRaw(url, as) {
   const bad = checkHost(url);
   if (bad) return { error: bad };
   try {
     const res = await fetch(url, { credentials: "omit" });
     if (!res.ok) return { error: `HTTP ${res.status}` };
-    return as === "text" ? { text: await res.text() } : { buffer: await res.arrayBuffer() };
+    if (as === "text") return { text: await res.text() };
+    const dataUrl = await blobToDataUrl(await res.blob());
+    return { base64: dataUrl.slice(dataUrl.indexOf(",") + 1) };
   } catch (e) {
     return { error: String(e) };
   }
@@ -159,21 +170,23 @@ function setBadge(tabId, text, color) {
   if (color) browser.action.setBadgeBackgroundColor({ tabId, color });
 }
 
-// A save from a private window stays a private download, so it doesn't land
-// in the permanent download history.
-async function save(blob, filename, incognito) {
-  if (!(blob instanceof Blob)) throw new Error("save: expected a Blob");
-  const url = URL.createObjectURL(blob);
+// Firefox sends the archive itself as a Blob. Chrome can't, so its content
+// script sends a blob: URL it created instead (a service worker can't make one).
+async function save({ blob, url, filename }, incognito) {
+  const own = blob instanceof Blob ? URL.createObjectURL(blob) : null;
+  if (!own && !/^blob:/.test(url || "")) throw new Error("save: expected a Blob or blob: URL");
   try {
     const id = await browser.downloads.download({
-      url,
+      url: own || url,
       filename,
       saveAs: false,
       conflictAction: "uniquify",
-      incognito,
+      // A save from a private window stays a private download, so it doesn't
+      // land in the permanent download history. (Firefox-only option.)
+      ...(FIREFOX ? { incognito } : {}),
     });
     return { id };
   } finally {
-    setTimeout(() => URL.revokeObjectURL(url), 120_000);
+    if (own) setTimeout(() => URL.revokeObjectURL(own), 120_000);
   }
 }

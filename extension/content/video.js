@@ -130,9 +130,16 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
   };
 
   async function ask(type, url) {
-    const res = await browser.runtime.sendMessage({ type, url });
+    const res = await XTA.send({ type, url });
     if (res?.error) throw new Error(res.error);
     return res;
+  }
+
+  function fromBase64(s) {
+    const bin = atob(s);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
   }
 
   function blobToDataUrl(blob) {
@@ -154,10 +161,10 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
     }
     if (!list.length || run.opts.video === "none") return;
 
-    const playlists = await browser.runtime.sendMessage({ type: "video-playlists" });
+    const playlists = await XTA.send({ type: "video-playlists" });
     const io = {
       text: async (url) => (await ask("fetch-text", url)).text,
-      bytes: async (url) => new Uint8Array((await ask("fetch-bytes", url)).buffer),
+      bytes: async (url) => fromBase64((await ask("fetch-bytes", url)).base64),
     };
     const results = new Map(); // mediaId -> { file } | { reason }, for videos shown twice
     const stats = run.archive.stats;

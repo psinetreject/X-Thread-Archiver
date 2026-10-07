@@ -1,5 +1,6 @@
 // Leading "/" matters: Firefox resolves these against the popup's own URL.
 const CONTENT_SCRIPTS = [
+  "/lib/compat.js",
   "/content/selectors.js",
   "/content/extract.js",
   "/content/capture.js",
@@ -65,7 +66,7 @@ function saveOptions(o) {
 
 async function status() {
   try {
-    return await browser.tabs.sendMessage(tab.id, { type: "status" });
+    return await XTA.sendToTab(tab.id, { type: "status" });
   } catch {
     return null; // content script not injected yet
   }
@@ -91,7 +92,7 @@ async function refresh() {
   }
   // Fetch the log ahead of time so the copy happens right inside the click.
   if ((s?.error || s?.result) && logText === null) {
-    logText = (await browser.tabs.sendMessage(tab.id, { type: "log" }).catch(() => null)) || "";
+    logText = (await XTA.sendToTab(tab.id, { type: "log" }).catch(() => null)) || "";
   }
   $("copyLog").hidden = !logText;
 }
@@ -110,7 +111,7 @@ $("form").addEventListener("submit", async (e) => {
       const failed = results.find((r) => r.error);
       if (failed) throw new Error(`content script failed: ${failed.error.message || failed.error}`);
     }
-    await browser.tabs.sendMessage(tab.id, { type: "start", options });
+    await XTA.sendToTab(tab.id, { type: "start", options });
   } catch (err) {
     msg(`Couldn't start: ${err.message}`, "err");
     return;
@@ -136,7 +137,7 @@ $("compare").addEventListener("click", (e) => {
 });
 
 $("stop").addEventListener("click", () => {
-  browser.tabs.sendMessage(tab.id, { type: "cancel" }).catch(() => {});
+  XTA.sendToTab(tab.id, { type: "cancel" }).catch(() => {});
   $("phase").textContent = "Stopping…";
 });
 

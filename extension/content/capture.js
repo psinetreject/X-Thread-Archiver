@@ -168,15 +168,17 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
       width: Math.ceil(r.width),
       height: Math.ceil(r.height),
     };
+    const caps = await XTA.caps();
+    const image = caps.rectCapture ? await loadImage(await grab(rect)) : await grabSlices(rect);
+    return { dataUrl: encode(image, opts.format), w: rect.width, h: rect.height };
+  }
+
+  XTA.caps = () => (XTA.capsPromise ??= XTA.send({ type: "caps" }));
+
+  async function grab(rect) {
     for (let attempt = 0; ; attempt++) {
       try {
-        const { dataUrl } = await browser.runtime.sendMessage({
-          type: "capture",
-          rect,
-          format: opts.format,
-          quality: 0.92,
-        });
-        return { dataUrl, w: rect.width, h: rect.height };
+        return (await XTA.send({ type: "capture", rect })).dataUrl;
       } catch (e) {
         // Another tab came to the front between our check and the capture.
         if (!String(e?.message).includes("tab-not-in-front") || attempt >= 5) throw e;
@@ -184,6 +186,69 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
         await sleep(500);
       }
     }
+  }
+
+  function loadImage(src) {
+    const img = new Image();
+    img.src = src;
+    return img.decode().then(() => img);
+  }
+
+  // Chrome can only capture the visible screen. Capture the post one
+  // screenful at a time, crop each capture to the post, and stitch them.
+  async function grabSlices(rect) {
+    const end = rect.y + rect.height;
+    let canvas = null;
+    let ctx = null;
+    let scale = 1;
+    for (let y = rect.y; y < end - 0.5; ) {
+      const top = scrollY;
+      if (y < top || Math.min(end, y + 1) > top + innerHeight) {
+        window.scrollTo({ top: y, behavior: "instant" });
+        await frames();
+        hideFloating();
+        await frames();
+      }
+      const shotTop = scrollY;
+      const sliceEnd = Math.min(end, shotTop + innerHeight);
+      const img = await loadImage(await grab(rect));
+      if (!canvas) {
+        scale = img.naturalHeight / innerHeight; // device pixels per CSS pixel
+        canvas = document.createElement("canvas");
+        canvas.width = Math.round(rect.width * scale);
+        canvas.height = Math.round(rect.height * scale);
+        ctx = canvas.getContext("2d");
+      }
+      const h = sliceEnd - y;
+      ctx.drawImage(
+        img,
+        Math.round((rect.x - scrollX) * scale),
+        Math.round((y - shotTop) * scale),
+        Math.round(rect.width * scale),
+        Math.round(h * scale),
+        0,
+        Math.round((y - rect.y) * scale),
+        Math.round(rect.width * scale),
+        Math.round(h * scale),
+      );
+      if (sliceEnd <= y) break; // can't scroll any further
+      y = sliceEnd;
+    }
+    return canvas;
+  }
+
+  // WebP is far smaller than PNG for screenshots; PNG stays lossless.
+  function encode(image, format) {
+    let canvas = image;
+    if (!(image instanceof HTMLCanvasElement)) {
+      canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      canvas.getContext("2d").drawImage(image, 0, 0);
+    }
+    const type = format === "png" ? "image/png" : "image/webp";
+    const out = canvas.toDataURL(type, 0.92);
+    return out.startsWith(`data:${type}`) ? out : canvas.toDataURL("image/png");
   }
 
   // X only requests a video's playlist once the video starts, and the
@@ -199,7 +264,7 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
       .filter((p) => p.id);
     if (!players.length) return;
     const known = async () => {
-      const pl = await browser.runtime.sendMessage({ type: "video-playlists" });
+      const pl = await XTA.send({ type: "video-playlists" });
       return players.every((p) => pl[p.id]);
     };
     if (await known()) return;

@@ -11,25 +11,25 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
   let current = null;
   let lastLog = null;
 
-  const badge = (text, color) => browser.runtime.sendMessage({ type: "badge", text, color }).catch(() => {});
+  const badge = (text, color) => XTA.send({ type: "badge", text, color }).catch(() => {});
   XTA.setPhase = (phase) => (state.phase = phase);
   XTA.progress = (n) => {
     state.posts = n;
     badge(String(n));
   };
 
-  browser.runtime.onMessage.addListener((msg) => {
+  XTA.onMessage((msg) => {
     switch (msg?.type) {
       case "status":
-        return Promise.resolve({ ...state });
+        return { ...state };
       case "start":
         if (!state.running) start(msg.options || {});
-        return Promise.resolve({ ...state });
+        return { ...state };
       case "cancel":
         if (current) current.cancelled = true;
-        return Promise.resolve(true);
+        return true;
       case "log":
-        return Promise.resolve(lastLog);
+        return lastLog;
     }
   });
 
@@ -167,7 +167,7 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
 
       XTA.setPhase("Saving…");
       const filename = `x-archives/${m[1]}-${m[2]}-${stamp(started)}.html`;
-      await browser.runtime.sendMessage({ type: "save", blob, filename });
+      await saveFile(blob, filename);
       // A private capture can still be compared with earlier ones, but isn't remembered.
       if (!isPrivate) await XTA.history.add(run.focalId, snap).catch((e) => console.warn("[Thread Archiver] history:", e));
       state.result = {
@@ -187,6 +187,18 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
     } finally {
       Object.assign(state, { running: false, phase: "" });
       current = null;
+    }
+  }
+
+  // Firefox can hand the Blob to the background. Chrome can't pass Blobs in
+  // messages, so it gets a blob: URL made here (its service worker can't make one).
+  async function saveFile(blob, filename) {
+    if ((await XTA.caps()).blobMessages) return XTA.send({ type: "save", blob, filename });
+    const url = URL.createObjectURL(blob);
+    try {
+      return await XTA.send({ type: "save", url, filename });
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 120_000);
     }
   }
 
@@ -211,9 +223,7 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
     const worker = async () => {
       while (next < list.length) {
         const url = list[next++];
-        const res = await browser.runtime
-          .sendMessage({ type: "fetch-asset", url })
-          .catch((e) => ({ error: String(e) }));
+        const res = await XTA.send({ type: "fetch-asset", url }).catch((e) => ({ error: String(e) }));
         assets.set(url, res);
         run.archive.assets[url] = res.error
           ? { error: res.error }
