@@ -86,7 +86,8 @@ async function refresh() {
     const r = s.result;
     const compared = r.comparedWith ? ` It has a Changes tab comparing with your capture from ${r.comparedWith.slice(0, 10)}.` : "";
     const ended = r.endReason ? ` Ended: ${r.endReason}.` : "";
-    msg(`Saved ${r.posts} posts (${mb(r.bytes)})${r.partial ? ", incomplete" : ""} to Downloads/${r.filename}.${ended}${compared}`, "ok");
+    const priv = r.private ? " Private window: not added to the comparison history." : "";
+    msg(`Saved ${r.posts} posts (${mb(r.bytes)})${r.partial ? ", incomplete" : ""} to Downloads/${r.filename}.${ended}${compared}${priv}`, "ok");
   }
   // Fetch the log ahead of time so the copy happens right inside the click.
   if ((s?.error || s?.result) && logText === null) {

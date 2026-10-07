@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "X Thread Archiver",
-  "version": "0.2.0",
+  "name": "Thread Archiver for X",
+  "version": "0.3.0",
   "description": "Save an X/Twitter conversation as a single self-contained HTML file with a screenshot of every post.",
   "icons": {
     "48": "icons/icon.svg",

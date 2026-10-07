@@ -21,7 +21,7 @@ browser.runtime.onMessage.addListener((msg, sender) => {
       setBadge(tabId, msg.text, msg.color);
       return;
     case "save":
-      return save(msg.blob, msg.filename);
+      return save(msg.blob, msg.filename, !!sender.tab?.incognito);
   }
 });
 
@@ -146,7 +146,9 @@ function setBadge(tabId, text, color) {
   if (color) browser.action.setBadgeBackgroundColor({ tabId, color });
 }
 
-async function save(blob, filename) {
+// A save from a private window stays a private download, so it doesn't land
+// in the permanent download history.
+async function save(blob, filename, incognito) {
   if (!(blob instanceof Blob)) throw new Error("save: expected a Blob");
   const url = URL.createObjectURL(blob);
   try {
@@ -155,6 +157,7 @@ async function save(blob, filename) {
       filename,
       saveAs: false,
       conflictAction: "uniquify",
+      incognito,
     });
     return { id };
   } finally {

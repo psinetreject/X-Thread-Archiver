@@ -61,6 +61,8 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
     };
     const manifest = browser.runtime.getManifest();
     const started = new Date();
+    // Mozilla's rules: nothing from a private window may be stored.
+    const isPrivate = !!browser.extension?.inIncognitoContext;
 
     const run = (current = {
       opts,
@@ -90,6 +92,7 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
           viewport: { width: innerWidth, height: innerHeight },
           devicePixelRatio,
           pageBackground: getComputedStyle(document.body).backgroundColor,
+          privateWindow: isPrivate,
         },
         options: opts,
         partial: false,
@@ -165,7 +168,8 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
       XTA.setPhase("Saving…");
       const filename = `x-archives/${m[1]}-${m[2]}-${stamp(started)}.html`;
       await browser.runtime.sendMessage({ type: "save", blob, filename });
-      await XTA.history.add(run.focalId, snap).catch((e) => console.warn("[X Thread Archiver] history:", e));
+      // A private capture can still be compared with earlier ones, but isn't remembered.
+      if (!isPrivate) await XTA.history.add(run.focalId, snap).catch((e) => console.warn("[Thread Archiver] history:", e));
       state.result = {
         filename,
         posts: run.archive.stats.posts,
@@ -173,10 +177,11 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
         partial: run.archive.partial,
         comparedWith: previous?.capturedAt || null,
         endReason: run.endReason,
+        private: isPrivate,
       };
       badge("✓", "#2e7d32");
     } catch (e) {
-      console.error("[X Thread Archiver]", e);
+      console.error("[Thread Archiver]", e);
       state.error = e?.message || String(e);
       badge("!", "#c62828");
     } finally {
