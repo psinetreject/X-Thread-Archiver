@@ -174,6 +174,7 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
     const avatar = first(SEL.avatar);
     const bar = first(SEL.actionBar);
     const note = first(SEL.communityNote);
+    const social = first(SEL.socialContext);
     const author = extractUser(first(SEL.userName)) || { name: "", verified: false };
     author.handle = m[1];
     author.avatar = avatar ? avatar.src.replace("_normal.", "_bigger.") : null;
@@ -192,6 +193,45 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
       quote: quote ? extractQuote(quote, fullSize) : null,
       counts: bar ? parseCounts(bar.getAttribute("aria-label")) : null,
       communityNote: note ? flatText(note).trim() : null,
+      social: social ? flatText(social).trim() : null,
+    };
+  };
+
+  // Biggest versions X serves: avatars without a size suffix are the
+  // original upload; banners top out at 1500x500.
+  const fullAvatar = (src) => src.replace(/_(normal|bigger|mini|x96|200x200|400x400)(\.\w+)$/, "$2");
+  const fullBanner = (src) => src.replace(/\/[^/]+$/, "/1500x500");
+
+  // The profile header on a profile page.
+  XTA.extractProfile = function () {
+    const col = document.querySelector(SEL.primaryColumn);
+    const q = (sel) => col?.querySelector(sel) || null;
+    const nameEl = q(SEL.profileName);
+    const user = nameEl ? extractUser(nameEl) : null;
+    const bio = q(SEL.profileBio);
+    const urlEl = q(SEL.profileUrl);
+    const link = urlEl?.closest("a[href]") || urlEl?.querySelector("a[href]");
+    const count = (...suffixes) => {
+      for (const s of suffixes) {
+        const a = col?.querySelector(`a[href$="${s}"]`);
+        if (a) return blockText(a);
+      }
+      return null;
+    };
+    const avatar = q(SEL.profileAvatar)?.src;
+    const banner = q(SEL.profileBanner)?.src;
+    return {
+      name: user?.name || "",
+      handle: user?.handle || null,
+      verified: !!user?.verified,
+      ...(bio ? { bio: richText(bio) } : { bio: { text: "", parts: [] } }),
+      location: q(SEL.profileLocation) ? blockText(q(SEL.profileLocation)) : null,
+      url: urlEl ? { text: blockText(urlEl), href: link ? absUrl(link.getAttribute("href")) : null } : null,
+      joined: q(SEL.profileJoined) ? blockText(q(SEL.profileJoined)) : null,
+      following: count("/following"),
+      followers: count("/verified_followers", "/followers"),
+      avatar: avatar ? fullAvatar(avatar) : null,
+      banner: banner ? fullBanner(banner) : null,
     };
   };
 

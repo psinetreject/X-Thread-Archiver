@@ -55,6 +55,34 @@ function testCopy() {
     await page.waitForSelector("article");
     step("mock page loaded");
 
+    const run = async (options) => {
+      await sw.evaluate(
+        async ({ files, options }) => {
+          const [tab] = await chrome.tabs.query({ url: "https://x.com/*" });
+          globalThis.__tab = tab.id;
+          const loaded = await XTA.sendToTab(tab.id, { type: "status" }).catch(() => null);
+          if (!loaded) {
+            const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, files });
+            const failed = results.find((r) => r.error);
+            if (failed) throw new Error(`injection failed: ${failed.error.message || failed.error}`);
+          }
+          await XTA.sendToTab(tab.id, { type: "start", options });
+        },
+        { files: contentScripts(), options },
+      );
+      const t0 = Date.now();
+      let st;
+      for (;;) {
+        st = await sw.evaluate(() => XTA.sendToTab(globalThis.__tab, { type: "status" }));
+        if (!st.running) break;
+        step(`${st.phase} (${st.posts} posts)`);
+        if (Date.now() - t0 > 300000) throw new Error(`timed out: ${st.phase}`);
+        await new Promise((r) => setTimeout(r, 500));
+      }
+      if (st.error) throw new Error(`capture failed: ${st.error}`);
+      return { st, secs: Math.round((Date.now() - t0) / 1000) };
+    };
+
     // What the popup does when you click "Archive this conversation".
     await sw.evaluate(
       async ({ files, options }) => {
@@ -99,7 +127,8 @@ function testCopy() {
 
     // Screenshots: real crops at the screen's 2x density, and the reply
     // taller than the window stitched from several captures.
-    const shots = await (await context.newPage()).evaluate(async (archive) => {
+    const checker = await context.newPage();
+    const shots = await checker.evaluate(async (archive) => {
       document.documentElement.innerHTML = archive;
       const out = [];
       for (const img of document.querySelectorAll(".shot img")) {
@@ -132,6 +161,34 @@ function testCopy() {
     assert.ok(tall.quarters.every((q) => q > 0.3), `tall reply stitched with no gaps: ${JSON.stringify(tall.quarters)}`);
 
     console.log(`  ${shots.length} screenshots checked`);
+    await checker.close();
+    await page.bringToFront(); // captures need the x.com tab in front
+
+    // A profile: saved as a folder of files through chrome.downloads.
+    await page.goto("https://x.com/alice");
+    await page.waitForSelector("article");
+    const pr = await run({ partSize: 5, retryDelay: 300, video: "none" });
+    console.log(`  profile: ${pr.secs}s, ${pr.st.result.posts} posts in ${pr.st.result.files} files`);
+    assert.ok(/^x-archives\/alice-profile-[\dZ-]+\/index\.html$/.test(pr.st.result.filename), pr.st.result.filename);
+    // Playwright stores downloads under random names, so tell the files apart by content.
+    let saved = [];
+    for (let i = 0; i < 40; i++) {
+      const items = await sw.evaluate(() => chrome.downloads.search({ state: "complete" }));
+      saved = items.map((d) => archiveData(fs.readFileSync(d.filename, "utf8"))).filter((d) => d.profile || d.part);
+      if (saved.length >= pr.st.result.files) break;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    assert.equal(saved.length, pr.st.result.files, "every file downloaded");
+    const idx = saved.find((d) => d.profile);
+    assert.equal(idx?.profile.header.name, "Alice A", "index with the profile header");
+    const parts = saved.filter((d) => d.part);
+    assert.deepEqual(
+      [parts.filter((d) => d.part.tab === "posts").length, parts.filter((d) => d.part.tab === "replies").length],
+      [4, 4],
+      "parts of 5 for each tab",
+    );
+    const n = parts.reduce((sum, d) => sum + d.items.filter((i) => i.kind === "post" && i.shot).length, 0);
+    assert.equal(n, 34, "every profile post captured with a screenshot");
     console.log("CHROME TESTS PASSED");
   } finally {
     await context.close();

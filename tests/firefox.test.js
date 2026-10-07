@@ -4,8 +4,10 @@
 
 const assert = require("assert");
 const { firefox } = require("playwright");
-const { start } = require("./server");
-const { archiveData, postIds, routeMedia, checkFullConversation } = require("./lib");
+const fs = require("fs");
+const path = require("path");
+const { start, OUT } = require("./server");
+const { archiveData, walk, postIds, routeMedia, checkFullConversation } = require("./lib");
 
 async function capture(page, options) {
   await page.evaluate((o) => __send({ type: "start", options: o }), options);
@@ -25,6 +27,22 @@ async function capture(page, options) {
   }));
   return { st, ...out, data: archiveData(out.html), secs: Math.round((Date.now() - t0) / 1000) };
 }
+
+// A profile capture saves several files; return them all.
+async function captureProfile(page, options) {
+  await page.evaluate(() => (window.__saves = []));
+  const r = await capture(page, options);
+  const files = await page.evaluate(async () =>
+    Promise.all(__saves.map(async (f) => ({ name: f.filename.split("/").pop(), path: f.filename, html: await f.blob.text() }))),
+  );
+  return { ...r, files: Object.fromEntries(files.map((f) => [f.name, { ...f, data: archiveData(f.html) }])) };
+}
+
+const partsOf = (files, tab) =>
+  Object.keys(files)
+    .filter((n) => n.startsWith(`${tab}-`))
+    .sort()
+    .map((n) => files[n]);
 
 (async () => {
   const server = await start();
@@ -86,6 +104,69 @@ async function capture(page, options) {
     assert.ok(r4.st.result.comparedWith, "a private capture can still compare");
     assert.equal(await page.evaluate(() => JSON.stringify(__store)), before, "nothing stored from the private window");
     console.log("  run 4 (private window): ok");
+
+    // 5. A whole profile: header, Posts and Replies tabs, in parts of 5.
+    await page.evaluate(() => {
+      browser.extension.inIncognitoContext = false;
+      __goto("/alice");
+    });
+    await page.waitForTimeout(800);
+    const r5 = await captureProfile(page, { partSize: 5, retryDelay: 300, video: "none" });
+    console.log(`  run 5 (profile): ${r5.secs}s, ${r5.st.result.posts} posts in ${r5.st.result.files} files, ended: ${r5.st.result.endReason}`);
+    assert.equal(r5.st.result.profile, "alice");
+    assert.ok(/^x-archives\/alice-profile-[\dZ-]+\/index\.html$/.test(r5.st.result.filename), r5.st.result.filename);
+    const index = r5.files["index.html"];
+    assert.ok(index, "index.html saved");
+    // Kept for a look by hand (tests/.output is ignored by git).
+    fs.mkdirSync(OUT, { recursive: true });
+    for (const name of ["index.html", "posts-001.html", "replies-001.html"]) fs.writeFileSync(path.join(OUT, `profile-${name}`), r5.files[name].html);
+    const h = index.data.profile.header;
+    assert.deepEqual(
+      [h.name, h.handle, h.bio.text, h.location, h.url.text, h.joined, h.following, h.followers],
+      ["Alice A", "alice", "Archivist. Likes #tests", "Internet", "example.com", "Joined March 2010", "123 Following", "4,567 Followers"],
+    );
+    assert.equal(h.avatar, "https://pbs.twimg.com/profile_images/1/alice.jpg", "original-size profile picture");
+    assert.equal(h.banner, "https://pbs.twimg.com/profile_banners/1/2/1500x500", "largest banner");
+    assert.ok(index.html.includes("Screenshot of the profile header"));
+    assert.ok(index.data.walk.trace.some((t) => t.ev === "retry"), "retried when X said 'Something went wrong'");
+
+    const postParts = partsOf(r5.files, "posts");
+    assert.deepEqual(postParts.map((f) => f.name), ["posts-001.html", "posts-002.html", "posts-003.html", "posts-004.html"], "parts of 5");
+    assert.deepEqual(postParts.map((f) => f.data.part.next), ["posts-002.html", "posts-003.html", "posts-004.html", null], "part links");
+    const posts = postParts.flatMap((f) => [...walk(f.data.items)].filter((i) => i.kind === "post"));
+    const expectedPosts = ["400", "410", "411", "412", "450", ...Array.from({ length: 13 }, (_, i) => String(413 + i))];
+    assert.deepEqual(posts.map((p) => p.id), expectedPosts, `every post in order, skipping "Who to follow" and the ad: got ${posts.map((p) => p.id)}`);
+    assert.equal(posts[0].section, "pinned");
+    const repost = posts.find((p) => p.id === "450");
+    assert.deepEqual([repost.section, repost.social, repost.author.handle], ["repost", "Alice reposted", "carol"]);
+    assert.ok(postParts[0].html.includes("📌 Pinned post"), "pinned label");
+
+    const replyParts = partsOf(r5.files, "replies");
+    const replies = replyParts.flatMap((f) => [...walk(f.data.items)].filter((i) => i.kind === "post"));
+    const expectedReplies = Array.from({ length: 16 }, (_, i) => String(500 + i));
+    assert.deepEqual(replies.map((p) => p.id), expectedReplies, "replies with their context, past the retry, without repeating 411");
+    assert.deepEqual([...new Set(replies.map((p) => `${p.author.handle === "alice"}:${p.section}`))].sort(), ["false:context", "true:reply"]);
+    assert.ok(replyParts[0].html.includes("↩ The post this reply answers"), "context label");
+    assert.equal(index.data.stats.adsSkipped, 1);
+
+    // 6. Again after the profile changed, with only the Posts tab.
+    await page.evaluate(() => {
+      __mutateProfile();
+      __goto("/alice");
+    });
+    await page.waitForTimeout(800);
+    const r6 = await captureProfile(page, { partSize: 50, video: "none", tabs: ["posts"] });
+    console.log(`  run 6 (profile again): ${r6.secs}s, ${r6.st.result.posts} posts`);
+    assert.ok(r6.st.result.comparedWith, "compared with run 5");
+    const ch = r6.files["index.html"].html;
+    const pChanges = ch.slice(ch.indexOf('<section class="panel changes"'), ch.indexOf("</section></main>"));
+    const pSec = (h) => pChanges.slice(pChanges.indexOf(h), pChanges.indexOf("<h2>", pChanges.indexOf(h) + 4) >>> 0);
+    assert.ok(/Changed my bio/.test(pSec("<h2>Profile changes")), "bio change");
+    assert.ok(/A brand new post/.test(pSec("<h2>New since")), "new post");
+    const pGone = pSec("<h2>Gone");
+    assert.ok(/Alice post number 3/.test(pGone) && !/reply/.test(pGone), "only the deleted post is gone");
+    assert.ok(/Alice&#39;s reply 1/.test(pSec("<h2>Not checked")), "the Replies tab wasn't captured, so its posts aren't 'gone'");
+    assert.ok(/1 → 77/.test(pChanges), "like count change");
 
     console.log("FIREFOX TESTS PASSED");
   } finally {

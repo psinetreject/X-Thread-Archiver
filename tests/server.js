@@ -43,6 +43,7 @@ function contentScripts() {
 function mediaFile(host, pathname) {
   if (host === "pbs.twimg.com") {
     if (pathname.startsWith("/media/")) return path.join(FIX, "photo.jpg");
+    if (pathname.startsWith("/profile_banners/")) return path.join(FIX, "photo.jpg");
     if (/^\/(amplify_video_thumb|ext_tw_video_thumb|profile_images|card_img)\//.test(pathname)) return path.join(FIX, "thumb.jpg");
   }
   if (host === "video.twimg.com") {

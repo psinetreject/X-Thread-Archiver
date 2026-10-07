@@ -28,22 +28,7 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
         else if (i.kind === "branch" && i.url) unopened.push(i.url);
       }
     };
-    const addPost = (i, path) => {
-      const counts = {};
-      for (const k of METRICS) if (i.counts?.[k] != null) counts[k] = i.counts[k];
-      posts[i.id] = {
-        url: i.url,
-        handle: i.author?.handle || "",
-        name: i.author?.name || "",
-        time: i.time,
-        text: i.text || "",
-        cutOff: !!(i.truncated && !i.fullText),
-        counts,
-        note: i.communityNote || null,
-        media: i.media?.length || 0,
-        branches: path,
-      };
-    };
+    const addPost = (i, path) => (posts[i.id] = XTA.snapshotPost(i, { branches: path }));
     visit(archive.items, []);
     return {
       v: 1,
@@ -54,6 +39,25 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
       stopReason: archive.stopReason || null,
       unopened,
       posts,
+    };
+  };
+
+  // The compact copy of one post kept for comparisons (no images).
+  XTA.snapshotPost = function (i, extra = {}) {
+    const counts = {};
+    for (const k of METRICS) if (i.counts?.[k] != null) counts[k] = i.counts[k];
+    return {
+      url: i.url,
+      handle: i.author?.handle || "",
+      name: i.author?.name || "",
+      time: i.time,
+      text: i.text || "",
+      cutOff: !!(i.truncated && !i.fullText),
+      counts,
+      note: i.communityNote || null,
+      media: i.media?.length || 0,
+      section: i.section,
+      ...extra,
     };
   };
 
@@ -99,13 +103,18 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
       }
       if (Object.keys(delta).length) counts.push({ id, post: a, delta });
     }
-    // Posts that were inside a reply branch the newer capture didn't open
-    // weren't checked, so they aren't "gone".
+    // Posts the newer capture couldn't have seen aren't "gone": ones inside
+    // a reply branch it didn't open, ones on a profile tab it didn't capture,
+    // and ones older than the oldest post X loaded on that tab this time.
     const notChecked = [];
     const skipped = new Set(after.unopened || []);
+    const unseen = (b) =>
+      (b.branches || []).some((u) => skipped.has(u)) ||
+      (b.tab && after.tabs && !after.tabs.includes(b.tab)) ||
+      (b.tab && b.section !== "pinned" && b.section !== "repost" && b.section !== "context" && after.coverage?.[b.tab] && b.time < after.coverage[b.tab]);
     for (const [id, b] of Object.entries(before.posts)) {
       if (after.posts[id]) continue;
-      if ((b.branches || []).some((u) => skipped.has(u))) notChecked.push({ id, ...b });
+      if (unseen(b)) notChecked.push({ id, ...b });
       else gone.push({ id, ...b });
     }
 
@@ -131,8 +140,42 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
     counts.sort((x, y) => size(y) - size(x));
     const meta = (s) => ({ capturedAt: s.capturedAt, url: s.url, posts: Object.keys(s.posts).length, partial: s.partial, stopReason: s.stopReason });
 
-    return { before: meta(before), after: meta(after), added, gone, notChecked, edited, textChanged, renamed, notes, counts };
+    return {
+      before: meta(before),
+      after: meta(after),
+      profile: before.profile && after.profile ? diffProfiles(before.profile, after.profile) : [],
+      added,
+      gone,
+      notChecked,
+      edited,
+      textChanged,
+      renamed,
+      notes,
+      counts,
+    };
   };
+
+  // What changed in a profile's header.
+  function diffProfiles(b, a) {
+    const fields = [
+      ["Display name", (p) => p.name],
+      ["Handle", (p) => p.handle && `@${p.handle}`],
+      ["Bio", (p) => p.bio?.text],
+      ["Location", (p) => p.location],
+      ["Website", (p) => p.url?.text],
+      ["Following", (p) => p.following],
+      ["Followers", (p) => p.followers],
+      ["Profile picture", (p) => p.avatar, true],
+      ["Banner", (p) => p.banner, true],
+    ];
+    const out = [];
+    for (const [field, get, isImage] of fields) {
+      const x = norm(get(b));
+      const y = norm(get(a));
+      if (x !== y) out.push({ field, before: x, after: y, image: !!isImage });
+    }
+    return out;
+  }
 
   XTA.history = {
     key: (focalId) => `history:${focalId}`,

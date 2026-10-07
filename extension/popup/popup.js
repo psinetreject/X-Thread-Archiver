@@ -8,6 +8,7 @@ const CONTENT_SCRIPTS = [
   "/content/video.js",
   "/content/diff.js",
   "/content/render.js",
+  "/content/profile.js",
   "/content/main.js",
 ];
 // x.com is needed too: Firefox only shows an add-on the page's video requests
@@ -15,6 +16,7 @@ const CONTENT_SCRIPTS = [
 const ORIGINS = ["https://x.com/*", "https://twitter.com/*", "https://pbs.twimg.com/*", "https://video.twimg.com/*"];
 const STATUS_URL = /^https:\/\/(x|twitter)\.com\/[A-Za-z0-9_]{1,15}\/status\/\d+\/?([?#].*)?$/;
 const OPTIONS_KEY = "xta-options";
+let mode = null; // "conversation" or "profile"
 
 const $ = (id) => document.getElementById(id);
 let tab = null;
@@ -38,6 +40,7 @@ function readOptions() {
     maxPosts: $("maxPosts").value,
     expand: $("expand").checked,
     followBranches: $("followBranches").checked,
+    tabs: [$("tabPosts").checked && "posts", $("tabReplies").checked && "replies"].filter(Boolean),
     fullText: $("fullText").checked,
     fullSize: $("fullSize").checked,
     video: $("video").value,
@@ -49,7 +52,7 @@ function loadOptions() {
   try {
     const o = JSON.parse(localStorage.getItem(OPTIONS_KEY) || "{}");
     if (o.maxPosts) $("maxPosts").value = o.maxPosts;
-    for (const id of ["expand", "followBranches", "fullText", "fullSize"]) {
+    for (const id of ["expand", "followBranches", "fullText", "fullSize", "tabPosts", "tabReplies"]) {
       if (typeof o[id] === "boolean") $(id).checked = o[id];
     }
     if ([...$("video").options].some((opt) => opt.value === o.video)) $("video").value = o.video;
@@ -88,7 +91,10 @@ async function refresh() {
     const compared = r.comparedWith ? ` It has a Changes tab comparing with your capture from ${r.comparedWith.slice(0, 10)}.` : "";
     const ended = r.endReason ? ` Ended: ${r.endReason}.` : "";
     const priv = r.private ? " Private window: not added to the comparison history." : "";
-    msg(`Saved ${r.posts} posts (${mb(r.bytes)})${r.partial ? ", incomplete" : ""} to Downloads/${r.filename}.${ended}${compared}${priv}`, "ok");
+    const where = r.profile
+      ? `in ${r.files} files (${mb(r.bytes)})${r.partial ? ", incomplete" : ""} to Downloads/${r.filename.replace(/index\.html$/, "")}. Open index.html there.`
+      : `(${mb(r.bytes)})${r.partial ? ", incomplete" : ""} to Downloads/${r.filename}.`;
+    msg(`Saved ${r.posts} posts ${where}${ended}${compared}${priv}`, "ok");
   }
   // Fetch the log ahead of time so the copy happens right inside the click.
   if ((s?.error || s?.result) && logText === null) {
@@ -100,6 +106,10 @@ async function refresh() {
 $("form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const options = readOptions();
+  if (mode === "profile" && !options.tabs.length) {
+    msg("Pick at least one tab to archive.", "err");
+    return;
+  }
   saveOptions(options);
   // Has to be the first await so Firefox still treats it as a user action.
   // Resolves at once without a prompt if access was granted at install.
@@ -144,11 +154,18 @@ $("stop").addEventListener("click", () => {
 (async () => {
   [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   loadOptions();
-  if (!tab?.url || !STATUS_URL.test(tab.url)) {
+  const url = tab?.url ? new URL(tab.url) : null;
+  const onX = url && /^(x|twitter)\.com$/.test(url.hostname) && url.protocol === "https:";
+  const profile = onX && !STATUS_URL.test(tab.url) && XTA.profilePath(url.pathname);
+  mode = onX && STATUS_URL.test(tab.url) ? "conversation" : profile ? "profile" : null;
+  if (!mode) {
     show("none");
-    msg("Open a single post on x.com (a link with /status/ in it), then click this button again.");
+    msg("Open a post (a link with /status/ in it) or a profile on x.com, then click this button again.");
     return;
   }
+  document.querySelector(".conversation-only").hidden = mode !== "conversation";
+  document.querySelector(".profile-only").hidden = mode !== "profile";
+  if (profile) $("go").textContent = `Archive @${profile[1]}'s posts and replies`;
   await refresh();
   setInterval(refresh, 600);
 })();

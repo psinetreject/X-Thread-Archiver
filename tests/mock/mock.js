@@ -37,6 +37,43 @@ const P = {
   200: { h: "rec1", text: "Recommended post (must not be captured)", parent: null },
   201: { h: "rec2", text: "Another recommended post", parent: null },
 };
+// Alice's profile. Posts are newest first; replies come with the post they answer.
+const day = (n) => new Date(Date.UTC(2026, 9, 1) - n * 86400000).toISOString();
+const PROFILE = {
+  handle: "alice",
+  name: "Alice A",
+  bio: "Archivist. Likes ",
+  posts: [],
+  replies: [],
+};
+P[400] = { h: "alice", text: "Pinned intro post", time: "2024-01-01T12:00:00.000Z", social: "Pinned" };
+PROFILE.posts.push("400");
+for (let i = 0; i < 16; i++) {
+  const id = String(410 + i);
+  P[id] = { h: "alice", text: `Alice post number ${i + 1}`, time: day(i), likes: i };
+  PROFILE.posts.push(id);
+  if (i === 2) {
+    P[450] = { h: "carol", text: "Carol's post that Alice reposted", time: day(40), social: "Alice reposted" };
+    PROFILE.posts.push("450");
+  }
+}
+for (let i = 0; i < 8; i++) {
+  const ctx = String(500 + 2 * i);
+  const reply = String(501 + 2 * i);
+  P[ctx] = { h: ["bob", "carol", "dave", "erin", "fay", "gus", "hal", "ida"][i], text: `Someone's post ${i + 1}`, time: day(i + 1) };
+  P[reply] = { h: "alice", text: `Alice's reply ${i + 1}`, time: day(i) };
+  PROFILE.replies.push([ctx, reply]);
+  if (i === 1) PROFILE.replies.push(["411"]); // also on the Posts tab
+}
+
+window.__mutateProfile = () => {
+  PROFILE.bio = "Archivist. Changed my bio. Likes ";
+  PROFILE.posts.splice(PROFILE.posts.indexOf("412"), 1); // deleted
+  P[409] = { h: "alice", text: "A brand new post", time: day(-1) };
+  PROFILE.posts.splice(1, 0, "409");
+  P[411].likes = 77;
+};
+
 const ORDER = Object.keys(P); // numeric keys come out in numeric order
 const expanded = new Set();
 const onX = location.hostname === "x.com"; // extension mode: the real add-on is watching
@@ -68,13 +105,14 @@ function postHtml(id, opts = {}) {
     ? `<div data-testid="tweetPhoto"><div data-testid="videoPlayer"><video src="https://video.twimg.com/tweet_video/${p.gif}.mp4" poster="https://pbs.twimg.com/tweet_video_thumb/${p.gif}.jpg" style="width:100%;height:100px"></video></div></div>`
     : "";
   return `<article>
+    ${p.social ? `<div data-testid="socialContext">${esc(p.social)}</div>` : ""}
     <div data-testid="Tweet-User-Avatar"><img src="https://pbs.twimg.com/profile_images/1/${p.h}_normal.jpg" style="width:20px;height:20px"></div>
     <div data-testid="User-Name"><div><a href="/${p.h}"><span>${p.h.toUpperCase()}</span></a></div><div><a href="/${p.h}"><span>@${p.h}</span></a></div></div>
     <div data-testid="tweetText" lang="en"><span>${esc(text)}</span></div>
     ${p.long && !opts.full ? `<a href="/${p.h}/status/${id}" data-testid="tweet-text-show-more-link">Show more</a>` : ""}
     ${video}${photos}${gif}
     ${p.tall ? `<div class="tall" style="height:1180px;background:repeating-linear-gradient(0deg,#246 0 20px,#fc3 20px 40px)"></div>` : ""}
-    <a href="/${p.h}/status/${id}"><time datetime="2026-10-0${(Number(id) % 9) + 1}T12:00:00.000Z">Oct</time></a>
+    <a href="/${p.h}/status/${id}"><time datetime="${p.time || `2026-10-0${(Number(id) % 9) + 1}T12:00:00.000Z`}">Oct</time></a>
     <div role="group" aria-label="1 replies, 2 reposts, ${p.likes ?? 3} likes, 4 bookmarks, 500 views"></div>
   </article>`;
 }
@@ -124,6 +162,83 @@ function cellsFor(focal) {
   out.push(cell("disc", `<div><h2 role="heading">Discover more</h2></div>`, 60));
   for (const id of ["200", "201"]) out.push(cell(`p${id}`, postHtml(id), 140));
   return out;
+}
+
+// ---- Profile pages ----
+const BATCH = 6;
+const loaded = { posts: BATCH, replies: BATCH };
+let failedOnce = false; // the Replies tab fails once and needs Retry, like X's rate limit
+let loading = false;
+
+function profileHeader() {
+  return `<a href="/alice/header_photo"><img src="https://pbs.twimg.com/profile_banners/1/2/600x200" style="display:block;width:100%;height:150px"></a>
+    <div data-testid="UserAvatar-Container-alice"><a href="/alice/photo"><img src="https://pbs.twimg.com/profile_images/1/alice_200x200.jpg" style="width:80px;height:80px"></a></div>
+    <div data-testid="UserName"><div><span>${PROFILE.name}</span></div><div><span>@alice</span></div></div>
+    <div data-testid="UserDescription"><span>${esc(PROFILE.bio)}</span><a href="/hashtag/tests">#tests</a></div>
+    <div data-testid="UserProfileHeader_Items"><span data-testid="UserLocation">Internet</span>
+      <a data-testid="UserUrl" href="https://t.co/xyz">example.com</a><span data-testid="UserJoinDate">Joined March 2010</span></div>
+    <div><a href="/alice/following"><span>123</span> Following</a> <a href="/alice/verified_followers"><span>4,567</span> Followers</a></div>
+    <div role="tablist"><a role="tab" href="/alice">Posts</a> <a role="tab" href="/alice/with_replies">Replies</a> <a role="tab" href="/alice/media">Media</a></div>`;
+}
+
+function profileCells(tab) {
+  const all = [];
+  if (tab === "posts") {
+    PROFILE.posts.forEach((id, i) => {
+      all.push(cell(`p${id}`, postHtml(id), heightOf(id)));
+      if (i === 4) {
+        all.push(cell("wtf-h", `<div><h2 role="heading">Who to follow</h2></div>`, 50));
+        all.push(cell("wtf-1", `<div data-testid="UserCell"><a href="/bob">Bob</a> <div role="button">Follow</div></div>`, 70));
+        all.push(cell("wtf-2", `<div><a href="/i/connect_people">Show more</a></div>`, 40));
+      }
+      if (i === 7) {
+        all.push(cell("ad", `<div><article><div data-testid="top-impression-pixel"></div><div data-testid="User-Name"><div><span>Brand</span></div></div><div data-testid="tweetText">Buy things</div><span>Ad</span></article></div>`, 140));
+      }
+    });
+  } else {
+    for (const ids of PROFILE.replies) for (const id of ids) all.push(cell(`p${id}`, postHtml(id), heightOf(id)));
+  }
+  const shown = all.slice(0, loaded[tab]);
+  if (shown.length < all.length) {
+    if (tab === "replies" && loaded[tab] > BATCH && !failedOnce) {
+      shown.push(cell("err", `<div>Something went wrong. Try reloading. <div role="button" tabindex="0" data-retry="1">Retry</div></div>`, 80));
+    } else if (loading) {
+      shown.push(cell("spin", `<div role="progressbar">Loading…</div>`, 40));
+    }
+  }
+  return { shown, more: shown.length < all.length };
+}
+
+const profileTab = () => {
+  const m = location.pathname.match(/^\/alice(\/with_replies)?\/?$/);
+  return m ? (m[1] ? "replies" : "posts") : null;
+};
+
+// Like X: when the bottom comes into view, show a spinner and load the next batch.
+function maybeLoadMore() {
+  const tab = profileTab();
+  if (!tab || loading) return;
+  const bottom = timeline.getBoundingClientRect().bottom;
+  if (bottom > innerHeight + 200) return;
+  const { more } = profileCells(tab);
+  if (!more) return;
+  if (tab === "replies" && loaded.replies > BATCH && !failedOnce) return; // waiting for Retry
+  loading = true;
+  relayout();
+  setTimeout(() => {
+    loading = false;
+    loaded[tab] += BATCH;
+    relayout();
+  }, 600);
+}
+
+function relayout() {
+  const y = scrollY;
+  const tab = profileTab();
+  cells = tab ? profileCells(tab).shown : cells;
+  layout();
+  scrollTo(0, y);
+  paint();
 }
 
 // ---- Rendering with virtualization ----
@@ -178,8 +293,19 @@ function paint() {
 function render(restoreY) {
   const m = location.pathname.match(/^\/[^/]+\/status\/(\d+)/);
   const focal = m ? m[1] : null;
+  const tab = profileTab();
   for (const el of live.values()) el.remove();
   live.clear();
+  document.getElementById("profile").innerHTML = tab ? profileHeader() : "";
+  if (tab) {
+    loaded[tab] = Math.max(loaded[tab], BATCH);
+    cells = profileCells(tab).shown;
+    layout();
+    paint();
+    scrollTo(0, restoreY ?? 0);
+    paint();
+    return;
+  }
   cells = focal && P[focal] ? cellsFor(focal) : [cell("gone", `<div>This post is unavailable.</div>`, 80)];
   layout();
   paint();
@@ -193,10 +319,23 @@ function render(restoreY) {
   paint();
 }
 
-addEventListener("scroll", () => requestAnimationFrame(paint));
+// X loads more when the end of the list is in view, scrolled or not.
+setInterval(maybeLoadMore, 300);
+addEventListener("scroll", () =>
+  requestAnimationFrame(() => {
+    paint();
+    maybeLoadMore();
+  }),
+);
 
 // Like X: internal links navigate in-page (preventDefault + pushState).
 document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-retry]")) {
+    failedOnce = true;
+    loaded.replies += BATCH;
+    relayout();
+    return;
+  }
   const exp = e.target.closest("[data-expand]");
   if (exp) {
     expanded.add(exp.dataset.expand);

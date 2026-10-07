@@ -91,6 +91,11 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
   const spinnerShowing = () =>
     [...document.querySelectorAll(`${SEL.primaryColumn} ${SEL.progress}`)].some((el) => !el.closest(SEL.article));
 
+  const retryButton = () =>
+    [...document.querySelectorAll(`${SEL.primaryColumn} ${SEL.button}`)].find(
+      (b) => !b.closest(SEL.article) && /^\s*retry\s*$/i.test(b.textContent),
+    ) || null;
+
   const docTop = (el) => el.getBoundingClientRect().top + scrollY;
   const docBottom = (el) => el.getBoundingClientRect().bottom + scrollY;
   const signature = () => `${cells().length}:${docEl.scrollHeight}`;
@@ -168,10 +173,33 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
       width: Math.ceil(r.width),
       height: Math.ceil(r.height),
     };
+    return shootRect(rect, opts);
+  }
+
+  // Screenshot a region (CSS pixels, document coordinates).
+  async function shootRect(rect, opts) {
     const caps = await XTA.caps();
     const image = caps.rectCapture ? await loadImage(await grab(rect)) : await grabSlices(rect);
     return { dataUrl: encode(image, opts.format), w: rect.width, h: rect.height };
   }
+
+  // A profile's header: from the banner (or picture) down to the tab bar.
+  XTA.shootHeader = async function (opts) {
+    const col = document.querySelector(SEL.primaryColumn);
+    const top = col?.querySelector(SEL.profileBanner)?.closest("a") || col?.querySelector(SEL.profileAvatar) || col?.querySelector(SEL.profileName);
+    const tabs = col?.querySelector(SEL.tabList);
+    if (!top || !tabs) return null;
+    window.scrollTo({ top: 0, behavior: "instant" });
+    await waitForImages(col, 4000);
+    await frames();
+    hideFloating();
+    await frames();
+    const c = col.getBoundingClientRect();
+    const y0 = docTop(top);
+    const y1 = docTop(tabs);
+    if (y1 - y0 < 10) return null;
+    return shootRect({ x: Math.floor(c.left + scrollX), y: Math.floor(y0), width: Math.ceil(c.width), height: Math.ceil(y1 - y0) }, opts);
+  };
 
   XTA.caps = () => (XTA.capsPromise ??= XTA.send({ type: "caps" }));
 
@@ -388,8 +416,18 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
     let idle = 0;
     let lastPostId = page.focalId;
     let section = page.main ? "ancestor" : "reply";
+    let pagePosts = 0;
+    let retries = 0;
+    const tl = page.timeline; // profile tab: { tab, limit, section(post), onPost() }
 
-    if (page.main) {
+    if (tl) {
+      // Start just below the profile's tab bar.
+      window.scrollTo({ top: 0, behavior: "instant" });
+      await sleep(500);
+      const tabs = document.querySelector(`${SEL.primaryColumn} ${SEL.tabList}`);
+      cursorY = tabs ? docBottom(tabs) : 0;
+      XTA.setPhase(`Capturing the ${tl.tab} tab…`);
+    } else if (page.main) {
       XTA.setPhase("Loading earlier posts…");
       await loadAncestors(run);
       XTA.setPhase("Capturing…");
@@ -412,15 +450,16 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
     };
 
     const end = (reason) => {
-      run.log("end", { depth: page.depth, reason });
-      if (page.main) run.endReason = reason;
+      run.log("end", { depth: page.depth, tab: tl?.tab, reason });
+      page.endReason = reason;
+      if (page.main || tl) run.endReason = reason;
     };
 
     while (true) {
       run.check();
       await waitVisible();
-      if (stats.posts >= opts.maxPosts) {
-        run.hitLimit(`Reached the limit of ${opts.maxPosts} posts`);
+      if (stats.posts >= opts.maxPosts || (tl?.limit && pagePosts >= tl.limit)) {
+        run.hitLimit(`Reached the limit of ${tl?.limit || opts.maxPosts} posts`);
         end("post limit");
         return;
       }
@@ -454,7 +493,25 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
           idle,
         });
         if (idle >= (loading ? 15 : 5)) {
-          end("reached the bottom of the page");
+          // X shows "Something went wrong" with a Retry button when it stops
+          // serving (often its rate limit). Wait, retry, and back off.
+          const retry = retryButton();
+          if (retry && retries < opts.maxRetries) {
+            const wait = opts.retryDelay * 2 ** retries++;
+            run.log("retry", { attempt: retries, waitMs: wait });
+            for (let left = wait; left > 0; left -= 1000) {
+              XTA.setPhase(`X stopped loading more (rate limit?). Retrying in ${Math.ceil(left / 1000)} s…`);
+              await sleep(Math.min(1000, left));
+              run.check();
+            }
+            XTA.setPhase("Capturing…");
+            safeClick(retry);
+            idle = 0;
+            await sleep(1500);
+            continue;
+          }
+          if (retry) run.hitLimit("X stopped loading more posts (probably its rate limit)");
+          end(retry ? "X kept refusing to load more (rate limit?)" : "reached the bottom of the page");
           return;
         }
         window.scrollBy({ top: innerHeight * 0.8, behavior: "instant" });
@@ -477,6 +534,16 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
         text: XTA.blockText(cell).slice(0, 40),
       });
       const canFollow = opts.followBranches && page.depth < opts.maxDepth && stats.branchesOpened < opts.maxBranches;
+
+      // Spinners and spacers are skipped without moving the cursor past them:
+      // X replaces a loading spinner with the next posts in the same spot.
+      // In a profile timeline the same goes for everything that isn't a post
+      // ("Who to follow", carousels, "Show this thread" links, headings).
+      if (kind === "empty" || cell.querySelector(SEL.progress) || (tl && kind !== "post")) {
+        done.add(cell);
+        if (kind === "ad") stats.adsSkipped++;
+        continue;
+      }
 
       if (kind === "expander" || kind === "branch") {
         const el = kind === "expander" ? expanderButton(cell) : branchLink(cell);
@@ -584,19 +651,25 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
           }
           if (post.fullText) stats.longPostsExpanded++;
         }
-        if (post.id === run.focalId) section = "focal";
-        post.section = section;
-        if (section === "focal") section = "reply";
+        if (tl) {
+          post.section = tl.section(post);
+        } else {
+          if (post.id === run.focalId) section = "focal";
+          post.section = section;
+          if (section === "focal") section = "reply";
+        }
         if (shot) {
           run.shots.set(post.id, shot.dataUrl);
           post.shot = { w: shot.w, h: shot.h };
         }
         page.out.push({ kind: "post", ...post });
         stats.posts++;
+        pagePosts++;
         if (post.section === "ancestor") stats.ancestors++;
         if (post.section === "reply") stats.replies++;
         if (post.truncated && !post.fullText) stats.truncated++;
         XTA.progress(stats.posts);
+        await tl?.onPost();
         continue;
       }
 
@@ -641,5 +714,8 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
   }
 
   XTA.walkConversation = (run) => walkPage(run, { depth: 0, focalId: run.focalId, out: run.archive.items, main: true });
+  XTA.walkTimeline = (run, page) => walkPage(run, Object.assign(page, { depth: 0 }));
+  // Click one of X's links and wait for the new page (for switching profile tabs).
+  XTA.followLink = async (el) => (await activate(el.parentElement || el, el)) === "navigated";
   XTA.Stop = Stop;
 })();

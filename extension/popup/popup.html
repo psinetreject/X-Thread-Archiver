@@ -10,9 +10,17 @@
   <button id="copyLog" type="button" class="secondary" hidden>Copy capture log</button>
 
   <form id="form" hidden>
-    <label class="row">Stop after <input type="number" id="maxPosts" min="1" max="5000" value="1000"> posts</label>
-    <label class="row"><input type="checkbox" id="expand" checked> Open hidden replies</label>
-    <label class="row"><input type="checkbox" id="followBranches" checked> Follow “Show replies” branches</label>
+    <div class="conversation-only">
+      <label class="row">Stop after <input type="number" id="maxPosts" min="1" max="5000" value="1000"> posts</label>
+      <label class="row"><input type="checkbox" id="expand" checked> Open hidden replies</label>
+      <label class="row"><input type="checkbox" id="followBranches" checked> Follow “Show replies” branches</label>
+    </div>
+    <fieldset class="profile-only" hidden>
+      <legend>Profile</legend>
+      <label class="row"><input type="checkbox" id="tabPosts" checked> Posts tab</label>
+      <label class="row"><input type="checkbox" id="tabReplies" checked> Replies tab</label>
+      <p class="hint">Goes back as far as X loads. Saved as a folder: open its index.html.</p>
+    </fieldset>
     <label class="row"><input type="checkbox" id="fullText" checked> Get full text of long posts</label>
     <label class="row"><input type="checkbox" id="fullSize" checked> Full-size images</label>
     <label class="row">Videos
@@ -27,7 +35,7 @@
       <label class="row"><input type="radio" name="format" value="webp" checked> Compact (WebP)</label>
       <label class="row"><input type="radio" name="format" value="png"> Lossless (PNG, larger file)</label>
     </fieldset>
-    <button type="submit">Archive this conversation</button>
+    <button type="submit" id="go">Archive this conversation</button>
   </form>
 
   <div id="running" hidden>
@@ -39,6 +47,7 @@
   <p class="hint">Keep the tab in front while it runs. It scrolls the page and opens reply branches by itself.</p>
   <p class="hint"><a href="#" id="compare">Compare two archive files…</a></p>
   <script src="/lib/compat.js"></script>
+  <script src="/content/selectors.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

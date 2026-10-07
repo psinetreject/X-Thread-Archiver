@@ -151,11 +151,11 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
     });
   }
 
-  // Downloads every video in the archive into `assets` as "video:<mediaId>".
-  XTA.collectVideos = async function (run, assets) {
+  // Downloads every video in an archive file into `assets` as "video:<mediaId>".
+  XTA.collectVideos = async function (run, assets, archive) {
     const maxSide = run.opts.video === "best" ? 0 : 720;
     const list = [];
-    for (const i of XTA.walkItems(run.archive.items)) {
+    for (const i of XTA.walkItems(archive.items)) {
       if (i.kind !== "post") continue;
       for (const m of [...i.media, ...(i.quote?.media || [])]) if (m.type === "video") list.push(m);
     }
@@ -167,7 +167,7 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
       bytes: async (url) => fromBase64((await ask("fetch-bytes", url)).base64),
     };
     const results = new Map(); // mediaId -> { file } | { reason }, for videos shown twice
-    const stats = run.archive.stats;
+    const stats = archive.stats;
     let n = 0;
     for (const m of list) {
       n++;
@@ -188,7 +188,7 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
             });
             const key = `video:${m.mediaId}`;
             assets.set(key, { dataUrl: await blobToDataUrl(res.blob), mime: res.blob.type, bytes: res.blob.size });
-            run.archive.assets[key] = { mime: res.blob.type, bytes: res.blob.size };
+            archive.assets[key] = { mime: res.blob.type, bytes: res.blob.size };
             results.set(m.mediaId, {
               file: { mime: res.blob.type, bytes: res.blob.size, quality: res.quality, seconds: Math.round(res.duration) },
             });

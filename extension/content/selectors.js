@@ -25,6 +25,18 @@ XTA.SEL = {
   communityNote: '[data-testid="birdwatch-pivot"]',
   actionBar: '[role="group"][aria-label]',
   progress: '[role="progressbar"]',
+  socialContext: '[data-testid="socialContext"]', // "Pinned", "You reposted"
+
+  // Profile pages
+  profileName: '[data-testid="UserName"]',
+  profileBio: '[data-testid="UserDescription"]',
+  profileLocation: '[data-testid="UserLocation"]',
+  profileUrl: '[data-testid="UserUrl"]',
+  profileJoined: '[data-testid="UserJoinDate"]',
+  profileBanner: 'a[href$="/header_photo"] img',
+  profileAvatar: '[data-testid^="UserAvatar-Container"] img',
+  tabList: '[role="tablist"]',
+  userCell: '[data-testid="UserCell"]', // "Who to follow" cards
 
   // Fixed/floating UI that should never appear in screenshots.
   overlays: [
@@ -45,4 +57,13 @@ XTA.BRANCH_TEXT = /show (more )?repl/i;
 XTA.VIDEO_THUMB_ID = /\/(?:amplify_video_thumb|ext_tw_video_thumb)\/(\d+)\//;
 
 XTA.STATUS_PATH = /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)\/?$/;
+// A profile's Posts or Replies tab. The first part must not be one of X's own pages.
+XTA.PROFILE_PATH = /^\/([A-Za-z0-9_]{1,15})(?:\/(with_replies))?\/?$/;
+XTA.NOT_PROFILES = new Set(
+  "home explore notifications messages i settings search compose login logout signup tos privacy jobs communities lists bookmarks premium hashtag account intent share topics jf".split(" "),
+);
+XTA.profilePath = (pathname) => {
+  const m = pathname.match(XTA.PROFILE_PATH);
+  return m && !XTA.NOT_PROFILES.has(m[1].toLowerCase()) ? m : null;
+};
 XTA.STATUS_HREF = /^\/([A-Za-z0-9_]{1,15})\/status\/(\d+)/;

@@ -23,6 +23,23 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
   }
 
   const fmtSeconds = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const fmtDay = (iso) => (iso ? new Date(iso).toISOString().slice(0, 10) : "?");
+  const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  const took = (ms) => (ms < 60000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60000)} min`);
+  // "3 posts, 1 repost, 2 replies" from [count, singular, plural] triples, skipping zeros.
+  const tally = (rows) =>
+    rows
+      .filter(([n]) => n)
+      .map(([n, one, many]) => plural(n, one, many))
+      .join(", ");
+  // Links between the files of a profile archive (all in one folder).
+  const partHref = (f) => (/^(index|[a-z]+-\d{3})\.html$/.test(f || "") ? f : "#");
+  const textHtml = (parts) => parts.map((x) => (x.t === "link" ? `<a href="${safeHref(x.href)}">${esc(x.v)}</a>` : esc(x.v))).join("");
+  const LABELS = {
+    pinned: "📌 Pinned post",
+    repost: null, // uses X's own label, e.g. "You reposted"
+    context: "↩ The post this reply answers",
+  };
 
   const CSS = `
 :root{--bg:#fff;--fg:#0f1419;--muted:#536471;--line:#e6ecf0;--card:#f7f9f9;--accent:#1d70b8;--warn-bg:#fff4e5;--warn-fg:#7a4100;--up:#1b7a3a;--down:#b3261e}
@@ -41,10 +58,22 @@ h1{margin:6px 0 14px;font-size:20px;line-height:1.3;overflow-wrap:anywhere}
 .view{position:absolute;opacity:0;pointer-events:none}
 .tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);margin-top:8px;position:sticky;top:0;background:var(--bg);z-index:1;overflow-x:auto}
 .tabs label{padding:10px 14px;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent;font-weight:600;white-space:nowrap}
-#v-shots:checked~.wrap label[for=v-shots],#v-text:checked~.wrap label[for=v-text],#v-changes:checked~.wrap label[for=v-changes]{color:var(--fg);border-color:var(--accent)}
-#v-shots:focus-visible~.wrap label[for=v-shots],#v-text:focus-visible~.wrap label[for=v-text],#v-changes:focus-visible~.wrap label[for=v-changes]{outline:2px solid var(--accent)}
+#v-shots:checked~.wrap label[for=v-shots],#v-text:checked~.wrap label[for=v-text],#v-changes:checked~.wrap label[for=v-changes],#v-overview:checked~.wrap label[for=v-overview]{color:var(--fg);border-color:var(--accent)}
+#v-shots:focus-visible~.wrap label[for=v-shots],#v-text:focus-visible~.wrap label[for=v-text],#v-changes:focus-visible~.wrap label[for=v-changes],#v-overview:focus-visible~.wrap label[for=v-overview]{outline:2px solid var(--accent)}
 .panel{display:none}
-#v-shots:checked~.wrap .shots,#v-text:checked~.wrap .text,#v-changes:checked~.wrap .changes{display:block}
+#v-shots:checked~.wrap .shots,#v-text:checked~.wrap .text,#v-changes:checked~.wrap .changes,#v-overview:checked~.wrap .overview{display:block}
+.overview{padding-top:12px}
+.overview h2{font-size:16px;margin:24px 0 4px}
+.banner{display:block;width:100%;aspect-ratio:3/1;object-fit:cover;border-radius:12px;margin-top:12px;background:var(--line)}
+.pav{display:block;width:96px;height:96px;object-fit:cover;border-radius:50%;border:4px solid var(--bg);margin:-48px 0 0 16px;position:relative;background:var(--line)}
+.pav.alone{margin:12px 0 0}
+.handle{margin:-10px 0 8px;color:var(--muted)}
+.bio{white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 12px}
+.parts{padding-left:22px;margin:6px 0}
+.parts li{margin:4px 0}
+.sub{color:var(--muted);font-size:13px}
+.partnav{font-size:14px;margin:0 0 12px}
+.ctx{margin:0 0 2px;color:var(--muted);font-size:13px;font-weight:600}
 .shots{padding-top:12px}
 .shot{position:relative}
 .shot img{display:block;max-width:100%;height:auto}
@@ -125,7 +154,9 @@ td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
       );
     }
     const notChecked = d.notChecked || [];
+    const profile = d.profile || [];
     const summary = [
+      [profile.length, "profile change", "profile changes"],
       [d.edited.length, "possibly edited"],
       [d.textChanged.length, "text changed"],
       [d.gone.length, "gone"],
@@ -143,6 +174,16 @@ td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
     const beforeAfter = (b, a) =>
       `<div class="was"><span class="lbl">Before</span>${esc(b)}</div><div class="now"><span class="lbl">After</span>${esc(a)}</div>`;
 
+    if (profile.length) {
+      out.push(`<h2>Profile changes</h2>`);
+      for (const c of profile) {
+        const body = c.image
+          ? `<p class="sub">${c.before ? "Changed" : "Added"}. The current image is in this archive's header.</p>`
+          : beforeAfter(c.before || "(none)", c.after || "(none)");
+        out.push(`<div class="chg"><div class="hd"><b>${esc(c.field)}</b></div>${body}</div>`);
+      }
+    }
+
     if (d.edited.length) {
       out.push(`<h2>Possibly edited</h2><p class="hint">X gives an edited post a new ID. These pairs have the same author and similar text.</p>`);
       for (const e of d.edited) out.push(`<div class="chg">${refHtml(e.after)}${beforeAfter(e.before.text, e.after.text)}</div>`);
@@ -157,7 +198,7 @@ td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
     }
     if (notChecked.length) {
       out.push(
-        `<h2>Not checked this time</h2><p class="hint">${plural(notChecked.length, "post was", "posts were")} inside reply branches that this capture didn't open, so there's no way to tell whether they changed.</p>`,
+        `<h2>Not checked this time</h2><p class="hint">${plural(notChecked.length, "post was", "posts were")} out of this capture's reach: inside a reply branch it didn't open, on a tab it didn't capture, or older than the oldest post X loaded this time. There's no way to tell whether they changed.</p>`,
         `<details class="full"><summary>Show them</summary>`,
       );
       for (const g of notChecked) out.push(`<div class="chg">${refHtml(g)}<div class="txt">${esc(snippet(g.text, 280))}</div></div>`);
@@ -211,6 +252,99 @@ td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
     );
   };
 
+  // ---- A profile's index page -----------------------------------------------
+
+  XTA.renderProfileIndex = function (archive, p, assets, diff) {
+    const h = p.header || {};
+    const asset = (url) => (url && assets.get(url)?.dataUrl) || null;
+    const day = archive.captured.startedAt.slice(0, 10);
+    const tabs = Object.entries(p.tabs);
+    const posts = Object.values(p.snapPosts);
+    const count = (s) => posts.filter((x) => x.section === s).length;
+    const out = [];
+
+    out.push(
+      `<!doctype html>\n<html lang="en"><head><meta charset="utf-8">`,
+      `<meta name="viewport" content="width=device-width,initial-scale=1">`,
+      `<meta name="generator" content="${esc(archive.tool.name)} ${esc(archive.tool.version)}">`,
+      `<title>${esc(`@${p.handle} profile, archived ${day}`)}</title><style>${CSS}</style></head><body>`,
+      `<input class="view" type="radio" name="view" id="v-overview" checked aria-label="Overview">`,
+      diff ? `<input class="view" type="radio" name="view" id="v-changes" aria-label="Changes view">` : "",
+      `<div class="wrap"><header><p class="kicker">Archived profile</p>`,
+    );
+    const banner = asset(h.banner);
+    const avatar = asset(h.avatar);
+    if (banner) out.push(`<img class="banner" alt="Banner of @${esc(p.handle)}" src="`, banner, `">`);
+    if (avatar) out.push(`<img class="pav${banner ? "" : " alone"}" alt="Profile picture of @${esc(p.handle)}" src="`, avatar, `">`);
+    out.push(
+      `<h1>${esc(h.name || p.handle)}${h.verified ? ` <span class="badge" title="Verified">✔</span>` : ""}</h1>`,
+      `<p class="handle">@${esc(h.handle || p.handle)}</p>`,
+      h.bio?.text ? `<p class="bio">${textHtml(h.bio.parts)}</p>` : "",
+      `<dl class="meta">`,
+      `<dt>Profile</dt><dd><a href="${safeHref(`https://x.com/${p.handle}`)}">x.com/${esc(p.handle)}</a></dd>`,
+      h.location ? `<dt>Location</dt><dd>${esc(h.location)}</dd>` : "",
+      h.url ? `<dt>Website</dt><dd><a href="${safeHref(h.url.href)}">${esc(h.url.text)}</a></dd>` : "",
+      h.joined ? `<dt>Joined</dt><dd>${esc(h.joined.replace(/^Joined\s*/i, ""))}</dd>` : "",
+      h.following || h.followers
+        ? `<dt>At capture</dt><dd>${[h.following, h.followers].filter(Boolean).map(esc).join(" · ")}</dd>`
+        : "",
+      `<dt>Captured</dt><dd>${fmtTime(archive.captured.startedAt)} (took ${took(archive.captured.durationMs)})</dd>`,
+      `<dt>Contents</dt><dd>${plural(posts.length, "post", "posts")}: ` +
+        tally([
+          [count("post"), "post", "posts"],
+          [count("pinned"), "pinned", "pinned"],
+          [count("repost"), "repost", "reposts"],
+          [count("reply"), "reply", "replies"],
+          [count("context"), "context post", "context posts"],
+        ]) +
+        ` in ${plural(p.parts.length, "part file", "part files")} (${mb(p.bytes)})</dd>`,
+      diff ? `<dt>Compared</dt><dd>with your capture from ${fmtTime(diff.before.capturedAt)} (see Changes)</dd>` : "",
+      `</dl>`,
+    );
+    for (const [tab, t] of tabs) {
+      if (t.partial) out.push(`<p class="warn">The ${tab} tab is incomplete: ${esc(t.endReason)}</p>`);
+    }
+    if (archive.partial && archive.stopReason) out.push(`<p class="warn">Incomplete: ${esc(archive.stopReason)}</p>`);
+    if (archive.walk) {
+      const lines = archive.walk.trace.map(({ ms, ev, ...rest }) => `${String(ms).padStart(7)} ms  ${ev}  ${JSON.stringify(rest)}`);
+      out.push(
+        `<details class="full"><summary>Capture log</summary><pre class="log">${esc(lines.join("\n"))}</pre></details>`,
+      );
+    }
+    out.push(
+      `<nav class="tabs"><label for="v-overview">Overview</label>`,
+      diff ? `<label for="v-changes">Changes</label>` : "",
+      `</nav></header><main><section class="panel overview" aria-label="Overview">`,
+    );
+    if (p.headerShot) {
+      out.push(
+        `<details class="full" open><summary>Screenshot of the profile header</summary><img loading="lazy" decoding="async" width="${p.headerShot.w}" height="${p.headerShot.h}" alt="Profile header of @${esc(p.handle)}" src="`,
+        p.headerShot.dataUrl,
+        `"></details>`,
+      );
+    }
+    for (const [tab, t] of tabs) {
+      const name = tab === "posts" ? "Posts" : "Replies";
+      out.push(
+        `<h2>${name} tab</h2><p class="sub">${plural(t.posts, "post", "posts")} in ${plural(t.parts, "file", "files")}. Ended: ${esc(t.endReason || "unknown")}.</p><ol class="parts">`,
+      );
+      for (const f of p.parts.filter((x) => x.tab === tab)) {
+        out.push(
+          `<li><a href="${partHref(f.file)}">${name} ${num(f.from)}–${num(f.to)}</a> ` +
+            `<span class="sub">${f.newest ? `${fmtDay(f.newest)} → ${fmtDay(f.oldest)} · ` : ""}${mb(f.bytes)}</span></li>`,
+        );
+      }
+      out.push(`</ol>`);
+    }
+    out.push(`</section>`);
+    if (diff) out.push(`<section class="panel changes" aria-label="Changes">`, XTA.renderChanges(diff), `</section>`);
+    out.push(`</main></div>`);
+
+    const data = { ...archive, items: undefined, profile: { handle: p.handle, header: h, tabs: p.tabs, parts: p.parts, coverage: p.coverage } };
+    out.push(`<script type="application/json" id="xta-data">`, JSON.stringify(data).replace(/</g, "\\u003c"), `</script></body></html>\n`);
+    return out;
+  };
+
   // ---- The archive --------------------------------------------------------
 
   XTA.renderArchive = function (archive, shots, assets, diff) {
@@ -229,14 +363,25 @@ td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
       if (a && !avatarClass.has(a) && asset(a)) avatarClass.set(a, `a${avatarClass.size}`);
     }
 
-    const title = focal ? `@${focal.author.handle}: “${snippet(focal.text, 100)}”` : "Archived conversation";
+    const part = archive.part;
+    const title = part
+      ? `@${part.handle}: ${part.tabName}, part ${part.n}`
+      : focal
+        ? `@${focal.author.handle}: “${snippet(focal.text, 100)}”`
+        : "Archived conversation";
     const day = archive.captured.startedAt.slice(0, 10);
 
     out.push(
       `<!doctype html>\n<html lang="en"><head><meta charset="utf-8">`,
       `<meta name="viewport" content="width=device-width,initial-scale=1">`,
       `<meta name="generator" content="${esc(archive.tool.name)} ${esc(archive.tool.version)}">`,
-      `<title>${esc(focal ? `@${focal.author.handle} conversation, archived ${day}` : `Archived conversation ${day}`)}</title>`,
+      `<title>${esc(
+        part
+          ? `@${part.handle} ${part.tabName.toLowerCase()} part ${part.n}, archived ${day}`
+          : focal
+            ? `@${focal.author.handle} conversation, archived ${day}`
+            : `Archived conversation ${day}`,
+      )}</title>`,
       `<style>${CSS}`,
     );
     for (const [url, cls] of avatarClass) out.push(`.${cls}{background-image:url("`, asset(url), `")}\n`);
@@ -248,13 +393,30 @@ td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
       `<input class="view" type="radio" name="view" id="v-text" aria-label="Text view">`,
       diff ? `<input class="view" type="radio" name="view" id="v-changes" aria-label="Changes view">` : "",
       `<div class="wrap"><header>`,
-      `<p class="kicker">Archived conversation</p><h1>${esc(title)}</h1>`,
+      `<p class="kicker">Archived ${part ? "profile" : "conversation"}</p><h1>${esc(title)}</h1>`,
+      part
+        ? `<p class="partnav"><a href="index.html">← Profile index</a>` +
+            (part.prev ? ` · <a href="${partHref(part.prev)}">Previous part</a>` : "") +
+            (part.next ? ` · <a href="${partHref(part.next)}">Next part</a>` : "") +
+            `</p>`
+        : "",
       `<dl class="meta">`,
       `<dt>Source</dt><dd><a href="${safeHref(archive.source.url)}">${esc(archive.source.url)}</a></dd>`,
-      `<dt>Captured</dt><dd>${fmtTime(archive.captured.startedAt)} (took ${Math.round(archive.captured.durationMs / 1000)} s)</dd>`,
-      `<dt>Contents</dt><dd>${plural(s.posts, "post", "posts")}: ${num(s.ancestors)} earlier, ${num(s.replies)} replies` +
-        (s.notices ? `, ${num(s.notices)} notices` : "") +
-        `</dd>`,
+      `<dt>Captured</dt><dd>${fmtTime(archive.captured.startedAt)}${part ? "" : ` (took ${Math.round(archive.captured.durationMs / 1000)} s)`}</dd>`,
+      part
+        ? `<dt>Contents</dt><dd>${part.tabName} tab, posts ${num(part.from)}–${num(part.to)}` +
+            (s.pinned || s.reposts || s.replies || s.context
+              ? `: ${tally([
+                  [s.pinned, "pinned", "pinned"],
+                  [s.reposts, "repost", "reposts"],
+                  [s.replies, "reply", "replies"],
+                  [s.context, "context post", "context posts"],
+                ])}`
+              : "") +
+            `</dd>`
+        : `<dt>Contents</dt><dd>${plural(s.posts, "post", "posts")}: ${num(s.ancestors)} earlier, ${num(s.replies)} replies` +
+          (s.notices ? `, ${num(s.notices)} notices` : "") +
+          `</dd>`,
       diff ? `<dt>Compared</dt><dd>with your capture from ${fmtTime(diff.before.capturedAt)} (see Changes)</dd>` : "",
       `</dl>`,
     );
@@ -343,7 +505,7 @@ td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
     function textHtml(list, depth) {
       for (const i of list) {
         if (i.kind === "post") {
-          if (depth === 0 && i.section !== lastSection && i.section !== "focal") {
+          if (!part && depth === 0 && i.section !== lastSection && i.section !== "focal") {
             out.push(`<p class="divider">${i.section === "ancestor" ? "Earlier in the conversation" : "Replies"}</p>`);
           }
           if (depth === 0) lastSection = i.section;
@@ -447,7 +609,9 @@ td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
 
     function postHtml(p) {
       const av = avatarClass.get(p.author.avatar);
+      const label = p.section === "repost" ? p.social : LABELS[p.section];
       out.push(
+        label ? `<p class="ctx">${p.section === "repost" ? "🔁 " : ""}${esc(label)}</p>` : "",
         `<article class="post ${esc(p.section)}" id="t-${esc(p.id)}">`,
         `<div class="av${av ? ` ${av}` : ""}" role="img" aria-label="@${esc(p.author.handle)}"></div><div>`,
         headerHtml(p.author, p.time, p.url),

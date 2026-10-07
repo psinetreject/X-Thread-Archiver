@@ -52,6 +52,7 @@ async function background(msg) {
     }
     case "save":
       window.__saved = { blob: msg.blob, filename: msg.filename };
+      (window.__saves ||= []).push(window.__saved);
       return { id: 1 };
     default:
       return null;
