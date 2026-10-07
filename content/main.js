@@ -215,7 +215,9 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
           .sendMessage({ type: "fetch-asset", url })
           .catch((e) => ({ error: String(e) }));
         assets.set(url, res);
-        run.archive.assets[url] = res.error ? { error: res.error } : { mime: res.mime, bytes: res.bytes };
+        run.archive.assets[url] = res.error
+          ? { error: res.error }
+          : { mime: res.mime, bytes: res.bytes, width: res.width, height: res.height };
         if (res.error) run.archive.stats.assetsFailed++;
         XTA.setPhase(`Downloading images… ${++done}/${list.length}`);
       }

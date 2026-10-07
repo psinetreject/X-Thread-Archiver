@@ -72,6 +72,13 @@ h1{margin:6px 0 14px;font-size:20px;line-height:1.3;overflow-wrap:anywhere}
 .media img,.media video{display:block;width:100%;height:auto;border-radius:12px;border:1px solid var(--line)}
 .media figure{margin:0}
 .media figcaption{font-size:13px;color:var(--muted);margin-top:4px}
+.zoom{display:block;position:relative;cursor:zoom-in}
+.zoom input{position:absolute;opacity:0;pointer-events:none}
+.zoom input:focus-visible+.frame img{outline:2px solid var(--accent);outline-offset:2px}
+.zoom .dims{position:absolute;right:6px;bottom:6px;padding:1px 6px;border-radius:4px;background:rgba(0,0,0,.6);color:#fff;font-size:11px}
+.zoom input:checked+.frame{position:fixed;inset:0;z-index:20;overflow:auto;padding:16px;background:rgba(0,0,0,.92);cursor:zoom-out}
+.zoom input:checked+.frame img{width:auto;max-width:100%;margin:0 auto;border:0;border-radius:0}
+.zoom input:checked~.dims{display:none}
 .card{display:block;margin-top:10px;border:1px solid var(--line);border-radius:12px;overflow:hidden;color:inherit;text-decoration:none}
 .card img{display:block;width:100%;height:auto}
 .card span{display:block;padding:8px 12px;font-size:14px;color:var(--muted)}
@@ -384,11 +391,22 @@ td.n{white-space:nowrap;font-variant-numeric:tabular-nums}
       out.push(`<div class="media${list.length > 1 ? " multi" : ""}">`);
       for (const m of list) {
         if (m.type === "photo") {
-          const data = asset(m.url);
+          const a = assets.get(m.url);
+          if (!a?.dataUrl) {
+            out.push(`<a href="${safeHref(m.url)}">Image (not saved)</a>`);
+            continue;
+          }
+          // A checkbox inside the label toggles a full-screen view of the same
+          // <img>, so enlarging needs no script and no second copy of the image.
+          const size = a.width && a.height ? `${a.width} × ${a.height}` : "";
           out.push(
-            data
-              ? `<img loading="lazy" decoding="async" alt="${esc(m.alt || "Image")}" src="${data}">`
-              : `<a href="${safeHref(m.url)}">Image (not saved)</a>`,
+            `<label class="zoom" title="Click to enlarge${size ? ` (${size})` : ""}">`,
+            `<input type="checkbox" aria-label="Enlarge image${size ? `, ${size} pixels` : ""}">`,
+            `<span class="frame"><img loading="lazy" decoding="async" alt="${esc(m.alt || "Image")}" src="`,
+            a.dataUrl,
+            `"></span>`,
+            size ? `<span class="dims" aria-hidden="true">${size}</span>` : "",
+            `</label>`,
           );
           continue;
         }

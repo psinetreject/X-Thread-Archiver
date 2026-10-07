@@ -70,9 +70,22 @@ async function fetchAsset(url) {
     if (blob.size > MAX_ASSET_BYTES) return { error: `too large (${blob.size} bytes)` };
     // The type ends up inside an HTML attribute, so keep it to a bare MIME type.
     const mime = (blob.type.split(";")[0].replace(/[^\w.+/-]/g, "") || "application/octet-stream").toLowerCase();
-    return { dataUrl: await blobToDataUrl(new Blob([blob], { type: mime })), mime, bytes: blob.size };
+    const size = mime.startsWith("image/") ? await imageSize(blob) : {};
+    return { dataUrl: await blobToDataUrl(new Blob([blob], { type: mime })), mime, bytes: blob.size, ...size };
   } catch (e) {
     return { error: String(e) };
+  }
+}
+
+// Pixel size, so the archive can show that an image is the full original.
+async function imageSize(blob) {
+  try {
+    const bmp = await createImageBitmap(blob);
+    const size = { width: bmp.width, height: bmp.height };
+    bmp.close();
+    return size;
+  } catch {
+    return {};
   }
 }
 
