@@ -1,14 +1,14 @@
 // A small imitation of X's conversation page, close enough to exercise the
 // add-on: in-page routing with pushState/popstate, virtualized cells (only
 // those near the viewport exist), a sticky header, "Show more" links, "Show
-// replies" branches, inline expander buttons, an ad, photos, a GIF, videos
-// and a "Discover more" section.
+// replies" branches, inline expander buttons, an ad, a focal post that is
+// also running as an ad, photos, a GIF, videos and a "Discover more" section.
 
 const LONG = "This is a very long post. ".repeat(30) + "THE END.";
 const P = {
   90: { h: "bob", text: "Original question?", parent: null },
   95: { h: "alice", text: "Reply in the chain above", parent: "90" },
-  100: { h: "alice", text: "The focal post", parent: "95", video: "555" },
+  100: { h: "alice", text: "The focal post", parent: "95", video: "555", promoted: true },
   101: { h: "carol", text: "First reply with some words in it", parent: "100", likes: 5 },
   102: { h: "dave", text: LONG, parent: "100", long: true },
   103: { h: "erin", text: "A reply that will be deleted", parent: "100" },
@@ -105,6 +105,7 @@ function postHtml(id, opts = {}) {
     ? `<div data-testid="tweetPhoto"><div data-testid="videoPlayer"><video src="https://video.twimg.com/tweet_video/${p.gif}.mp4" poster="https://pbs.twimg.com/tweet_video_thumb/${p.gif}.jpg" style="width:100%;height:100px"></video></div></div>`
     : "";
   return `<article>
+    ${p.promoted ? `<div data-testid="top-impression-pixel"></div>` : ""}
     ${p.social ? `<div data-testid="socialContext">${esc(p.social)}</div>` : ""}
     <div data-testid="Tweet-User-Avatar"><img src="https://pbs.twimg.com/profile_images/1/${p.h}_normal.jpg" style="width:20px;height:20px"></div>
     <div data-testid="User-Name"><div><a href="/${p.h}"><span>${p.h.toUpperCase()}</span></a></div><div><a href="/${p.h}"><span>@${p.h}</span></a></div></div>

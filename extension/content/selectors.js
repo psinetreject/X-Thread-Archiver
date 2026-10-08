@@ -7,8 +7,9 @@ XTA.SEL = {
   primaryColumn: '[data-testid="primaryColumn"]',
   cell: '[data-testid="cellInnerDiv"]',
   article: "article",
-  // Only ads carry impression pixels. (Not "placementTracking": X also wraps
-  // every ordinary video player in that.)
+  // Ads carry impression pixels, but so does a post that is also running as
+  // an ad; classify() tells them apart by the timestamp. (Not
+  // "placementTracking": X also wraps every ordinary video player in that.)
   ad: '[data-testid$="-impression-pixel"]',
   composer: '[role="textbox"], [contenteditable="true"]',
   heading: 'h2, [role="heading"]',

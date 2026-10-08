@@ -113,8 +113,11 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
 
   function classify(cell) {
     if (cell.getBoundingClientRect().height < 2) return "empty";
-    if (cell.querySelector(SEL.ad)) return "ad";
-    if (cell.querySelector(SEL.article)) return "post";
+    const article = cell.querySelector(SEL.article);
+    // An ad has no timestamp. A post that is also running as an ad has both
+    // an impression pixel and a timestamp, and is kept.
+    if (cell.querySelector(SEL.ad) && !(article && XTA.permalinkId(article))) return "ad";
+    if (article) return "post";
     if (cell.querySelector(SEL.composer)) return "skip";
     if (cell.querySelector(SEL.heading)) return "heading";
     if (expanderButton(cell)) return "expander";
