@@ -94,7 +94,7 @@ function postHtml(id, opts = {}) {
   const p = P[id];
   const text = p.long && !opts.full ? p.text.slice(0, 120) + "…" : p.text;
   const video = p.video
-    ? `<div data-testid="placementTracking"><div data-testid="videoPlayer"><video poster="https://pbs.twimg.com/amplify_video_thumb/${p.video}/img/p.jpg"${
+    ? `<div data-testid="placementTracking"><div data-testid="videoPlayer"><div role="progressbar" aria-valuenow="0"></div><video poster="https://pbs.twimg.com/amplify_video_thumb/${p.video}/img/p.jpg"${
         p.playing ? ' src="/fixtures/tone.wav" autoplay muted loop' : ""
       } style="display:block;width:100%;height:200px;background:#000"></video></div></div>`
     : "";

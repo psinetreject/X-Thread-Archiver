@@ -542,7 +542,9 @@ var XTA = globalThis.XTA || (globalThis.XTA = {});
       // X replaces a loading spinner with the next posts in the same spot.
       // In a profile timeline the same goes for everything that isn't a post
       // ("Who to follow", carousels, "Show this thread" links, headings).
-      if (kind === "empty" || cell.querySelector(SEL.progress) || (tl && kind !== "post")) {
+      // A post is never a spinner, even though its video player has a
+      // progress bar.
+      if (kind !== "post" && (kind === "empty" || tl || cell.querySelector(SEL.progress))) {
         done.add(cell);
         if (kind === "ad") stats.adsSkipped++;
         continue;
